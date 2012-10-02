@@ -21,13 +21,23 @@ package org.apache.maven.plugin.surefire.report;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.apache.maven.plugin.surefire.runorder.StatisticsReporter;
 import org.apache.maven.surefire.report.ConsoleLogger;
 import org.apache.maven.surefire.report.ConsoleOutputReceiver;
+import org.apache.maven.surefire.report.PojoStackTraceWriter;
 import org.apache.maven.surefire.report.ReportEntry;
 import org.apache.maven.surefire.report.RunListener;
 import org.apache.maven.surefire.report.RunStatistics;
+import org.apache.maven.surefire.report.SimpleReportEntry;
+import org.apache.maven.surefire.report.StackTraceWriter;
 import org.apache.maven.surefire.report.TestSetStatistics;
 import org.apache.maven.surefire.util.internal.ByteBuffer;
 
@@ -39,6 +49,15 @@ public class TestSetRunListener
     implements RunListener, Reporter, ConsoleOutputReceiver,
     ConsoleLogger     // todo: Does this have to be a reporter ?
 {
+    
+    private static final String EMPTY = ""; 
+    
+    private final AtomicBoolean testSetIsRunning = new AtomicBoolean(false);
+    
+    private final ConcurrentMap<String,String> testCaseMap = new ConcurrentHashMap<String,String>(2);
+    
+    private volatile String currentTestClassName;
+    
     private final TestSetStatistics testSetStatistics;
 
     private final RunStatistics globalStatistics;
@@ -110,9 +129,18 @@ public class TestSetRunListener
         multicastingReporter.writeMessage( buf, off, len );
     }
 
-    public void testSetStarting( ReportEntry report )
+    public synchronized void testSetStarting( final ReportEntry report )
     {
-        multicastingReporter.testSetStarting( report );
+    	if (testSetIsRunning.compareAndSet(false, true)) {
+    		currentTestClassName = report.getName();
+    		multicastingReporter.testSetStarting( report );
+    		if (!testCaseMap.isEmpty()) {
+    			System.out.println("ERROR: some test cases still did not finish, and a new test set is starting.");
+    		}
+    		testCaseMap.clear();
+    	} else {
+    		System.out.println("ERROR: a new test set is starting while a previous one is not completed.");
+    	}
     }
 
     public void clearCapture()
@@ -121,76 +149,143 @@ public class TestSetRunListener
         testStdOut.clear();
     }
 
-    public void testSetCompleted( ReportEntry report )
+    public synchronized void testSetCompleted( ReportEntry report )
     {
-        multicastingReporter.testSetCompleted( report );
-        multicastingReporter.reset();
-        globalStatistics.add( testSetStatistics );
-        testSetStatistics.reset();
+    	testSetCompletedImpl(report, true);
+    }
+    
+    private void testSetCompletedImpl(final ReportEntry report, final boolean checkCompleted) {
+    	if (checkCompleted && !testSetIsRunning.compareAndSet(true, false)) {
+    		System.out.println("ERROR: cannot mark test set completed while already completed.");
+    		return;
+    	}
+    	if (testCaseMap.isEmpty()) {
+    		multicastingReporter.testSetCompleted( report );
+    		multicastingReporter.reset();
+    		globalStatistics.add( testSetStatistics );
+    		testSetStatistics.reset();
+    		//System.out.println("}}} test set completed: " + currentTestClassName);
+        } else {
+        	System.out.println("ERROR: some test cases still did not finish, cannot mark test set completed.");
+        }
+    	currentTestClassName = null;
     }
 
     // ----------------------------------------------------------------------
     // Test
     // ----------------------------------------------------------------------
 
-    public void testStarting( ReportEntry report )
+    public synchronized void testStarting( final ReportEntry report )
     {
-        multicastingReporter.testStarting( report );
+    	if (!testSetIsRunning.get()) {
+    		System.out.println("ERROR: a new test is starting while test set is not running.");
+    		return;
+    	}
+    	if (startTestImpl(report)) {
+    		multicastingReporter.testStarting( report );
+    	} else {
+    		System.out.println("ERROR: failed to mark starting test ["+report+"].");
+    	}
+    }
+    
+    private boolean startTestImpl(final ReportEntry report) {
+        final String key = getTestKey(report);
+        String pushed = testCaseMap.putIfAbsent(key, EMPTY);
+        return (pushed == null);
     }
 
-    public void testSucceeded( ReportEntry report )
+    private boolean finishTestImpl( final ReportEntry entry, boolean check ) {
+    	if (check && !testSetIsRunning.get()) {
+    		System.out.println("ERROR: failed to finish test ["+entry+"] because the test set is not running.");
+    		return false;
+    	}
+        final String key = getTestKey(entry);
+        String v = testCaseMap.remove(key);
+        return true; //(v == EMPTY); skipped test may not be started.
+    }
+    
+    public synchronized void testSucceeded( ReportEntry report )
     {
-        testSetStatistics.incrementCompletedCount();
-        multicastingReporter.testSucceeded( report );
-        clearCapture();
+    	if (finishTestImpl(report, true)) {
+    		testSetStatistics.incrementCompletedCount();
+    		multicastingReporter.testSucceeded( report );
+    		clearCapture();
+    	} else {
+    		System.out.println("ERROR: failed to succeed test ["+report+"].");
+    	}
     }
 
-    public void testError( ReportEntry reportEntry )
+    public synchronized void testError( ReportEntry reportEntry )
     {
-        multicastingReporter.testError( reportEntry, getAsString( testStdOut ), getAsString( testStdErr ) );
-        testSetStatistics.incrementErrorsCount();
-        testSetStatistics.incrementCompletedCount();
-        globalStatistics.addErrorSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        clearCapture();
+    	testErrorImpl(reportEntry, true);
+    }
+    
+    private void testErrorImpl(ReportEntry reportEntry, boolean check) {
+    	if (finishTestImpl(reportEntry, check)) {
+    		multicastingReporter.testError( reportEntry, getAsString( testStdOut ), getAsString( testStdErr ) );
+    		testSetStatistics.incrementErrorsCount();
+        	testSetStatistics.incrementCompletedCount();
+        	globalStatistics.addErrorSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
+        	clearCapture();
+    	} else {
+    		System.out.println("ERROR: failed to error test ["+reportEntry+"].");
+    	}
     }
 
-    public void testError( ReportEntry reportEntry, String stdOutLog, String stdErrLog )
+    public synchronized void testError( ReportEntry reportEntry, String stdOutLog, String stdErrLog )
     {
-        multicastingReporter.testError( reportEntry, stdOutLog, stdErrLog );
-        testSetStatistics.incrementErrorsCount();
-        testSetStatistics.incrementCompletedCount();
-        globalStatistics.addErrorSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        clearCapture();
+    	if (finishTestImpl(reportEntry, true)) {
+    		multicastingReporter.testError( reportEntry, stdOutLog, stdErrLog );
+    		testSetStatistics.incrementErrorsCount();
+    		testSetStatistics.incrementCompletedCount();
+    		globalStatistics.addErrorSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
+    		clearCapture();
+    	} else {
+    		System.out.println("ERROR: failed to error test ["+reportEntry+"].");
+    	}
     }
 
-    public void testFailed( ReportEntry reportEntry )
+    public synchronized void testFailed( ReportEntry reportEntry )
     {
-        multicastingReporter.testFailed( reportEntry, getAsString( testStdOut ), getAsString( testStdErr ) );
-        testSetStatistics.incrementFailureCount();
-        testSetStatistics.incrementCompletedCount();
-        globalStatistics.addFailureSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        clearCapture();
+    	if (finishTestImpl(reportEntry, true)) {
+    		multicastingReporter.testFailed( reportEntry, getAsString( testStdOut ), getAsString( testStdErr ) );
+    		testSetStatistics.incrementFailureCount();
+    		testSetStatistics.incrementCompletedCount();
+    		globalStatistics.addFailureSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
+    		clearCapture();
+    	} else {
+    		System.out.println("ERROR: failed to fail test ["+reportEntry+"].");
+    	}
     }
 
-    public void testFailed( ReportEntry reportEntry, String stdOutLog, String stdErrLog )
+    public synchronized void testFailed( ReportEntry reportEntry, String stdOutLog, String stdErrLog )
     {
-        multicastingReporter.testFailed( reportEntry, stdOutLog, stdErrLog );
-        testSetStatistics.incrementFailureCount();
-        testSetStatistics.incrementCompletedCount();
-        globalStatistics.addFailureSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        clearCapture();
+    	if (finishTestImpl(reportEntry, true)) {
+    		multicastingReporter.testFailed( reportEntry, stdOutLog, stdErrLog );
+    		testSetStatistics.incrementFailureCount();
+    		testSetStatistics.incrementCompletedCount();
+    		globalStatistics.addFailureSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
+    		clearCapture();
+    	} else {
+    		System.out.println("ERROR: failed to fail test ["+reportEntry+"].");
+    	}
     }
 
     // ----------------------------------------------------------------------
     // Counters
     // ----------------------------------------------------------------------
 
-    public void testSkipped( ReportEntry report )
+    public synchronized void testSkipped( ReportEntry report )
     {
-        clearCapture();
-        testSetStatistics.incrementSkippedCount();
-        testSetStatistics.incrementCompletedCount();
-        multicastingReporter.testSkipped( report );
+    	if (finishTestImpl(report, true)) {
+         multicastingReporter.testSkipped( report );
+         testSetStatistics.incrementSkippedCount();
+         testSetStatistics.incrementCompletedCount();
+         globalStatistics.addSkippedSource( report.getName(), report.getStackTraceWriter());
+    		clearCapture();
+    	} else {
+    		System.out.println("ERROR: failed to skip test ["+report+"].");
+    	}
     }
 
     public void testAssumptionFailure( ReportEntry report )
@@ -198,9 +293,12 @@ public class TestSetRunListener
         testSkipped( report );
     }
 
-    public void reset()
+    public synchronized void reset()
     {
+    	testSetIsRunning.set(false);
+    	currentTestClassName = null;
         multicastingReporter.reset();
+        testCaseMap.clear();
     }
 
     public String getAsString( List<ByteBuffer> byteBufferList )
@@ -214,5 +312,42 @@ public class TestSetRunListener
             stringBuffer.append( byteBuffer.toString() );
         }
         return stringBuffer.toString();
+    }
+    
+    public synchronized void timeout(final int timeoutSeconds) {
+    	if (testSetIsRunning.compareAndSet(true, false)) {
+    		//System.out.println(this + " ====== timing out....");
+    		final Iterator<Entry<String,String>> it = testCaseMap.entrySet().iterator();
+    		final String source;
+    		final String name;
+    		if (it.hasNext()) {
+        		final Entry<String,String> e = it.next();
+//        		if (it.hasNext()) {
+//        			throw new AssertionError("More than 1 test is running.");
+//        		}
+        		final String runningTest = e.getKey();
+        		int hashPos = runningTest.indexOf('#');
+        		source = runningTest.substring(0, hashPos);
+        		name = runningTest.substring(hashPos + 1);
+    		} else {
+    			System.out.println("WARN: the test set is timed out while no test-case is being executed.");
+    			source = "" + currentTestClassName; // null protection
+    			name = "anUnknownTestMethod("+source+")";
+    			//throw new AssertionError("No test is running -- nothing to timeout.");
+    		}
+    		final String message = "Test timed out after "+timeoutSeconds+" seconds.";
+    		final StackTraceWriter stw = new PojoStackTraceWriter(null, null, new TimeoutException(message));
+    		final ReportEntry entry = new SimpleReportEntry(source, name, stw);
+    		testErrorImpl(entry, false);
+    		// ReportEntry entry2 = new SimpleReportEntry(source, name, "Test case ["+runningTest+"] timed out after "+timeoutSeconds+" seconds. ");
+    		testSetCompletedImpl(entry, false);
+    	} else {
+    		System.out.println("WARN: test set already timed out or completed.");
+    	}
+    }
+    
+    private String getTestKey(ReportEntry entry) {
+    	// FQN of the test case:
+    	return entry.getSourceName() + "#" + entry.getName();
     }
 }

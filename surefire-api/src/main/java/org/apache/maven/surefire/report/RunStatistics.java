@@ -39,6 +39,8 @@ public class RunStatistics
      * Holds the source(s) that causes the failure(s).
      */
     private final Sources failureSources = new Sources();
+    
+    private final Sources skippedSources = new Sources();
 
 
     public void addErrorSource( String errorSource, StackTraceWriter stackTraceWriter )
@@ -51,6 +53,13 @@ public class RunStatistics
         failureSources.addSource( failureSource, stackTraceWriter );
     }
 
+    public void addSkippedSource( String skippedSource, StackTraceWriter stackTraceWriter )
+    {
+        skippedSources.addSource( skippedSource, stackTraceWriter );
+    }
+    
+    // ------------------------
+    
     public Collection getErrorSources()
     {
         return errorSources.getListOfSources();
@@ -61,6 +70,10 @@ public class RunStatistics
         return failureSources.getListOfSources();
     }
 
+    public Collection getSkippedSources()
+    {
+        return skippedSources.getListOfSources();
+    }
 
     private static class Sources
     {

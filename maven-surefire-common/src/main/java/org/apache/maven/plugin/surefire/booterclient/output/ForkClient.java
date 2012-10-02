@@ -23,11 +23,14 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.StringTokenizer;
+
+import org.apache.maven.plugin.surefire.report.TestSetRunListener;
 import org.apache.maven.surefire.booter.ForkingRunListener;
 import org.apache.maven.surefire.report.CategorizedReportEntry;
 import org.apache.maven.surefire.report.ConsoleLogger;
@@ -65,7 +68,7 @@ public class ForkClient
         this.testVmSystemProperties = testVmSystemProperties;
     }
 
-    public void consumeLine( String s )
+    public void consumeLine( final String s )
     {
         try
         {
@@ -80,42 +83,54 @@ public class ForkClient
                 System.out.println( s );
                 return;
             }
-            final Integer channelNumber = Integer.parseInt( s.substring( 2, commma ), 16 );
-            RunListener reporter = testSetReporters.get( channelNumber );
-            if ( reporter == null )
-            {
-                reporter = providerReporterFactory.createReporter();
-                //reporter = new AsynchRunListener( reporter, "ForkClient" );
-                testSetReporters.put( channelNumber, reporter );
+            RunListener runListener = null;
+            final String remaining;
+            if (operationId == ForkingRunListener.BOOTERCODE_BYE) {
+            	// we don't need the runListener and the line in this case:
+            	remaining = null;
+            } else {
+            	final Integer channelNumber = Integer.parseInt( s.substring( 2, commma ), 16 );
+            	runListener = testSetReporters.get( channelNumber );
+            	if ( runListener == null )
+            	{
+            		runListener = providerReporterFactory.createReporter();
+            		// reporter = new AsynchRunListener( reporter, "ForkClient" );
+            		testSetReporters.put( channelNumber, runListener );
+            	}
+            	int rest = s.indexOf( ",", commma );
+            	remaining = s.substring( rest + 1 );
             }
-            int rest = s.indexOf( ",", commma );
-            final String remaining = s.substring( rest + 1 );
-
             switch ( operationId )
             {
                 case ForkingRunListener.BOOTERCODE_TESTSET_STARTING:
-                    reporter.testSetStarting( createReportEntry( remaining ) );
+                	//System.out.println(">>> test set start: ["+s+"]");
+                    runListener.testSetStarting( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TESTSET_COMPLETED:
-                    reporter.testSetCompleted( createReportEntry( remaining ) );
+                	//System.out.println(">>> test set completed: ["+s+"]");
+                    runListener.testSetCompleted( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TEST_STARTING:
-                    reporter.testStarting( createReportEntry( remaining ) );
+                	//System.out.println(">>> test starting: ["+s+"]");
+                    runListener.testStarting( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TEST_SUCCEEDED:
-                    reporter.testSucceeded( createReportEntry( remaining ) );
+                	//System.out.println(">>> test succeeded: ["+s+"]");
+                    runListener.testSucceeded( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TEST_FAILED:
-                    reporter.testFailed( createReportEntry( remaining ) );
+                	//System.out.println(">>> test failed: ["+s+"]");
+                    runListener.testFailed( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TEST_SKIPPED:
-                    reporter.testSkipped( createReportEntry( remaining ) );
+                    runListener.testSkipped( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TEST_ERROR:
-                    reporter.testError( createReportEntry( remaining ) );
+                	//System.out.println(">>> test error: ["+s+"]");
+                    runListener.testError( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_TEST_ASSUMPTIONFAILURE:
-                    reporter.testAssumptionFailure( createReportEntry( remaining ) );
+                    runListener.testAssumptionFailure( createReportEntry( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_SYSPROPS:
                     int keyEnd = remaining.indexOf( "," );
@@ -132,15 +147,15 @@ public class ForkClient
                 case ForkingRunListener.BOOTERCODE_STDOUT:
                     byte[] bytes = new byte[remaining.length() * 2];
                     int len = StringUtils.unescapeJava( bytes, remaining );
-                    ( (ConsoleOutputReceiver) reporter ).writeTestOutput( bytes, 0, len, true );
+                    ( (ConsoleOutputReceiver) runListener ).writeTestOutput( bytes, 0, len, true );
                     break;
                 case ForkingRunListener.BOOTERCODE_STDERR:
                     bytes = new byte[remaining.length() * 2];
                     len = StringUtils.unescapeJava( bytes, remaining );
-                    ( (ConsoleOutputReceiver) reporter ).writeTestOutput( bytes, 0, len, false );
+                    ( (ConsoleOutputReceiver) runListener ).writeTestOutput( bytes, 0, len, false );
                     break;
                 case ForkingRunListener.BOOTERCODE_CONSOLE:
-                    ( (ConsoleLogger) reporter ).info( createConsoleMessage( remaining ) );
+                    ( (ConsoleLogger) runListener ).info( createConsoleMessage( remaining ) );
                     break;
                 case ForkingRunListener.BOOTERCODE_BYE:
                     saidGoodBye = true;
@@ -175,7 +190,7 @@ public class ForkClient
         return unescape( remaining );
     }
 
-    private ReportEntry createReportEntry( String untokenized )
+    private ReportEntry createReportEntry( final String untokenized )
     {
         StringTokenizer tokens = new StringTokenizer( untokenized, "," );
         try
@@ -238,11 +253,27 @@ public class ForkClient
     }
 
 
-    public void close()
+    public void close(final boolean requireGoodBye)
     {
-        if (!saidGoodBye){
-            throw new RuntimeException( "The forked VM terminated without saying properly goodbye. VM crash or System.exit called ?" );
+    	//System.out.println("ForkClient#close()");
+        if (requireGoodBye && !saidGoodBye){
+            throw new RuntimeException( "The forked VM terminated without saying properly goodbye. VM crash or System.exit() called?" );
         }
+        testSetReporters.clear(); // just a cleanup
+    }
+    
+    /**
+     * Requests all the run listeners to close the run sessions and mark the lest tests as timed out: 
+     * @param seconds 
+     */
+    public void timeout(final int seconds) {
+    	final Collection<RunListener> runListeners = testSetReporters.values();
+    	for (RunListener rl: runListeners) {
+    		// XXX: need to cast it there, think to add #timeout(int) to the interface.  
+    		if (rl instanceof TestSetRunListener) {
+    			((TestSetRunListener)rl).timeout(seconds);
+    		}
+    	}
     }
     
 }

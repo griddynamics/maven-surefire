@@ -37,6 +37,9 @@ public class TestSetStatistics
     private int failures;
 
     private int skipped;
+    
+    private boolean isFailure;
+    private boolean isTimeout;
 
     public synchronized void incrementCompletedCount()
     {
@@ -58,6 +61,14 @@ public class TestSetStatistics
         skipped += 1;
     }
 
+    public synchronized void setFailure(boolean failure) {
+    	isFailure = failure;
+    }
+
+    public synchronized void setTimeout(boolean timeout) {
+    	isTimeout = timeout;
+    }
+    
     public synchronized boolean hadFailures()
     {
         return failures > 0;
@@ -81,7 +92,7 @@ public class TestSetStatistics
         return completedCount;
     }
 
-    public int getSkipped()
+    public synchronized int getSkipped()
     {
         return skipped;
     }
@@ -96,13 +107,13 @@ public class TestSetStatistics
 
     public synchronized RunResult getRunResult()
     {
-        return new RunResult( completedCount, errors, failures, skipped );
+        return new RunResult( completedCount, errors, failures, skipped, isFailure, isTimeout );
     }
 
     public synchronized String getSummary()
     {
         return "Tests run: " + completedCount + ", Failures: " + failures + ", Errors: " + errors + ", Skipped: "
-            + skipped;
+            + skipped + ", isFailure: " + isFailure + ", isTimeout: " + isTimeout;
     }
 
 }

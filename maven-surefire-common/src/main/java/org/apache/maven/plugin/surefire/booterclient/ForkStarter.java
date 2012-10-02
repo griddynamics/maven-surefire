@@ -23,6 +23,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
@@ -51,6 +52,7 @@ import org.codehaus.plexus.util.cli.CommandLineException;
 import org.codehaus.plexus.util.cli.CommandLineTimeOutException;
 import org.codehaus.plexus.util.cli.CommandLineUtils;
 import org.codehaus.plexus.util.cli.Commandline;
+import org.codehaus.plexus.util.cli.DefaultConsumer;
 
 
 /**
@@ -84,7 +86,7 @@ public class ForkStarter
 
     private static volatile int systemPropertiesFileCounter = 0;
 
-    private static final Object lock = new Object();
+    //private static final Object lock = new Object();
 
 
     public ForkStarter( ProviderConfiguration providerConfiguration, StartupConfiguration startupConfiguration,
@@ -134,45 +136,56 @@ public class ForkStarter
         return result;
     }
 
-    private RunResult runSuitesForkPerTestSet( final Properties properties, int forkCount )
+    private RunResult runSuitesForkPerTestSet( final Properties properties, final int forkCount )
         throws SurefireBooterForkException
     {
 
-        ArrayList<Future<RunResult>> results = new ArrayList<Future<RunResult>>( 500 );
-        ExecutorService executorService = new ThreadPoolExecutor( forkCount, forkCount, 60, TimeUnit.SECONDS,
+        final ArrayList<Future<RunResult>> results = new ArrayList<Future<RunResult>>( 500 );
+        final ExecutorService executorService = new ThreadPoolExecutor( forkCount, forkCount, 60, TimeUnit.SECONDS,
                                                                   new ArrayBlockingQueue<Runnable>( 500 ) );
 
         try
         {
             // Ask to the executorService to run all tasks
             RunResult globalResult = new RunResult( 0, 0, 0, 0 );
-            final Iterator suites = getSuitesIterator();
+            final Iterator<Object> suites = getSuitesIterator();
             while ( suites.hasNext() )
             {
                 final Object testSet = suites.next();
                 final ForkClient forkClient =
                     new ForkClient( fileReporterFactory, startupReportConfiguration.getTestVmSystemProperties() );
-                Callable<RunResult> pf = new Callable<RunResult>()
+                final Callable<RunResult> pf = new Callable<RunResult>()
                 {
+                	@Override
                     public RunResult call()
                         throws Exception
                     {
-                        return fork( testSet, (Properties) properties.clone(), forkClient,
-                                     fileReporterFactory.getGlobalRunStatistics() );
+                        return fork( testSet, (Properties) properties.clone(), forkClient, 
+                    	              fileReporterFactory.getGlobalRunStatistics() );
                     }
                 };
-                results.add( executorService.submit( pf ) );
-
+                Future<RunResult> future = executorService.submit( pf );
+                if (future == null) {
+                	throw new AssertionError("Future cannot be null.");
+                }
+                results.add(future);
             }
 
-            for ( Future<RunResult> result : results )
+            System.out.println("########### " + results.size() + " test set tasks submitted for execution." );
+            int obtainedResultCount = 0;
+            for ( final Future<RunResult> result: results )
             {
                 try
                 {
-                    RunResult cur = result.get();
-                    if ( cur != null )
+                    final RunResult current = result.get();
+                    if ( current != null )
                     {
-                        globalResult = globalResult.aggregate( cur );
+                    	obtainedResultCount++;
+                        //System.out.println("# global    result: #"+obtainedResultCount+": " + toDebugString(globalResult) );
+                        System.out.println("##### Results so far: #"+obtainedResultCount+": " + toDebugString(current) );
+                        //globalResult = globalResult.aggregate( current );
+                        globalResult = current;
+                        //System.out.println("# global + current: #"+obtainedResultCount+": " + toDebugString(globalResult) );
                     }
                     else
                     {
@@ -189,23 +202,46 @@ public class ForkStarter
                 }
             }
             return globalResult;
-
-        }
-        finally
-        {
+        } catch (final Throwable t) {
+        	System.out.println("############################################### FATAL ERROR: ");
+        	t.printStackTrace(System.out); // log the error -- make it visible in the log for sure.
+        	// cancel all the remaining tasks:
+        	System.out.println("Forcibly shutting down the executor service...");
+        	final List<Runnable> awaitingList = executorService.shutdownNow();
+        	if (awaitingList != null) {
+        		System.out.println("Cancelled execution of "+awaitingList.size()+" remaining test sets (+ possibly the current one).");
+        	}
+        	throw new SurefireBooterForkException("Fatal error while executing tests:", t);
+        } finally {
+        	// NB: this will wait for all the remaining tasks to complete:
             closeExecutor( executorService );
         }
-
     }
 
-    private void closeExecutor( ExecutorService executorService )
+    public static String toDebugString(final RunResult rr) {
+    	if (rr == null) {
+    		return null;
+    	}
+    	String x = "completed="+rr.getCompletedCount() + ": errors=" + rr.getErrors() + ", failures=" + rr.getFailures() + ", skipped=" + rr.getSkipped() + ", isFailure=" + rr.isFailure()
+                + ", isTimeout=" + rr.isTimeout();
+    	return x;
+    }
+    
+    private void closeExecutor( final ExecutorService executorService )
         throws SurefireBooterForkException
     {
-        executorService.shutdown();
+        executorService.shutdown(); 
         try
         {
             // Should stop immediately, as we got all the results if we are here
-            executorService.awaitTermination( 60 * 60, TimeUnit.SECONDS );
+        	final long timeoutSec = 60 * 60; // 1 hour
+        	System.out.println("Waiting "+timeoutSec+" sec for the test executor service to finish the remaining tests...");
+            final boolean closed = executorService.awaitTermination( timeoutSec, TimeUnit.SECONDS );
+            if (closed) {
+            	System.out.println("Executor closed.");
+            } else {
+            	throw new SurefireBooterForkException("ERROR: timed out closing the executor ("+timeoutSec+").");
+            }
         }
         catch ( InterruptedException e )
         {
@@ -214,8 +250,8 @@ public class ForkStarter
     }
 
 
-    private RunResult fork( Object testSet, Properties properties, ForkClient forkClient,
-                            RunStatistics globalRunStatistics )
+    private RunResult fork( final Object testSet, final Properties properties, final ForkClient forkClient,
+                            final RunStatistics globalRunStatistics )
         throws SurefireBooterForkException
     {
         File surefireProperties;
@@ -262,7 +298,7 @@ public class ForkStarter
             cli.createArg().setFile( systemProperties );
         }
 
-        ThreadedStreamConsumer threadedStreamConsumer = new ThreadedStreamConsumer( forkClient );
+        final ThreadedStreamConsumer threadedStreamConsumer = new ThreadedStreamConsumer( forkClient );
 
         if ( forkConfiguration.isDebug() )
         {
@@ -270,28 +306,40 @@ public class ForkStarter
         }
 
         RunResult runResult;
-
         try
         {
-            final int timeout = forkedProcessTimeoutInSeconds > 0 ? forkedProcessTimeoutInSeconds : 0;
+            final int timeout = (forkedProcessTimeoutInSeconds > 0) ? forkedProcessTimeoutInSeconds : 0;
             final int result =
                 CommandLineUtils.executeCommandLine( cli, threadedStreamConsumer, threadedStreamConsumer, timeout );
 
+            // wait for the buffered streamer to put everything to the forkClient (actual consumer):
             threadedStreamConsumer.close();
-            forkClient.close();
-            if ( result != RunResult.SUCCESS )
-            {
-                throw new SurefireBooterForkException( "Error occurred in starting fork, check output in log" );
+            
+            if ( result == RunResult.SUCCESS ) {
+            	forkClient.close(true); // NB: require goodbye: exception thrown from there if no "BYE" message was sent by the ForkedBooter.
+            } else {
+            	forkClient.close(false);
+                throw new SurefireBooterForkException( "Error occurred in starting fork, check output in the test log. Process exit code = "+result );
             }
 
             runResult = globalRunStatistics.getRunResult();
         }
         catch ( CommandLineTimeOutException e )
-        {
-            runResult = RunResult.Timeout;
+        { 
+            // wait for the buffered streamer to put everything to the forkClient (actual consumer):
+            threadedStreamConsumer.close();
+            // NB: ask the forkClient to complete the running test set and set appropriate statuses:
+            forkClient.timeout(forkedProcessTimeoutInSeconds);
+            globalRunStatistics.setTimeout(true); // NB: indicate that a timeout happened.
+            forkClient.close(false);
+            runResult = globalRunStatistics.getRunResult();
         }
         catch ( CommandLineException e )
         {
+            // wait for the buffered streamer to put everything to the forkClient (actual consumer):
+            threadedStreamConsumer.close();
+            forkClient.close(false); // just a cleanup in this case
+            // fail:
             throw new SurefireBooterForkException( "Error while executing forked tests.", e.getCause() );
         }
 
@@ -322,5 +370,5 @@ public class ForkStarter
             throw new SurefireBooterForkException( "Unable to create classloader to find test suites", e );
         }
     }
-
+    
 }

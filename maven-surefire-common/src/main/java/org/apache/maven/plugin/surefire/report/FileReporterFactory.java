@@ -123,17 +123,19 @@ public class FileReporterFactory
     {
         final ConsoleLogger logger = createConsoleLogger();
         logger.info( "" );
-        logger.info( "Results :" );
+        logger.info( "########## Results:" );
         logger.info( "" );
+        
         if ( globalStats.hadFailures() )
         {
-            multicastingReporter.writeMessage( "Failed tests: " );
+            multicastingReporter.writeMessage( "Failed tests: \n" );
             for ( Object o : this.globalStats.getFailureSources() )
             {
                 logger.info( "  " + o );
             }
             logger.info( "" );
         }
+        
         if ( globalStats.hadErrors() )
         {
             logger.info( "Tests in error: " );
@@ -143,6 +145,18 @@ public class FileReporterFactory
             }
             logger.info( "" );
         }
+        
+        // NB: also write down the info about the skipped tests:
+        final int skipped = globalStats.getSkipped();
+        if (skipped > 0) {
+           logger.info( "Skipped (@Ignore-d) tests: " );
+           for (Object o: globalStats.getSkippedSources() )
+           {
+               logger.info( "  " + o );
+           }
+           logger.info( "" );
+        }
+        
         logger.info( globalStats.getSummary() );
         logger.info( "" );
     }
