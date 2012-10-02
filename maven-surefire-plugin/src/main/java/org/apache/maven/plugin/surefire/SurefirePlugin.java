@@ -168,7 +168,7 @@ public class SurefirePlugin
         throws MojoExecutionException, MojoFailureException
     {
         assertNoException( summary );
-        assertNoFailureOrTimeout( summary );
+        //assertNoFailureOrTimeout( summary ); // commented by Ivan: we need the build to succeed if 'maven.test.failure.ignore' is test to true.
         writeSummary( summary );
     }
 
