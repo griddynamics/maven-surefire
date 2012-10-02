@@ -49,7 +49,7 @@ import java.util.Properties;
  * Run tests using Surefire.
  *
  * @author Jason van Zyl
- * @version $Id$
+ * @version $Id: SurefirePlugin.java 1357432 2012-07-04 22:34:35Z olamy $
  * @noinspection JavaDoc
  */
 @Mojo( name = "test", defaultPhase = LifecyclePhase.TEST, threadSafe = true,

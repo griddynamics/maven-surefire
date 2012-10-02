@@ -252,28 +252,39 @@ public class ForkClient
         return testSetReporters.get( channelNumber );
     }
 
+    public boolean isCorrectlyFinished() {
+      return saidGoodBye;
+    } 
 
-    public void close(final boolean requireGoodBye)
+    public void close()
     {
-    	//System.out.println("ForkClient#close()");
-        if (requireGoodBye && !saidGoodBye){
-            throw new RuntimeException( "The forked VM terminated without saying properly goodbye. VM crash or System.exit() called?" );
-        }
-        testSetReporters.clear(); // just a cleanup
+      testSetReporters.clear(); // just a cleanup
+//      if (requireGoodBye && !saidGoodBye){
+//        throw new RuntimeException( "The forked VM terminated without saying properly goodbye. VM crash or System.exit() called?" );
+//      }
     }
     
     /**
      * Requests all the run listeners to close the run sessions and mark the lest tests as timed out: 
      * @param seconds 
      */
-    public void timeout(final int seconds) {
+    public void timeout(final Exception exception) {
     	final Collection<RunListener> runListeners = testSetReporters.values();
     	for (RunListener rl: runListeners) {
     		// XXX: need to cast it there, think to add #timeout(int) to the interface.  
     		if (rl instanceof TestSetRunListener) {
-    			((TestSetRunListener)rl).timeout(seconds);
+    			((TestSetRunListener)rl).timeout(exception);
     		}
     	}
     }
     
+    public void failure(final String errMessage) {
+      final Collection<RunListener> runListeners = testSetReporters.values();
+      for (RunListener rl: runListeners) {
+        // XXX: need to cast it there.  
+        if (rl instanceof TestSetRunListener) {
+          ((TestSetRunListener)rl).failure(errMessage);
+        }
+      }
+    } 
 }

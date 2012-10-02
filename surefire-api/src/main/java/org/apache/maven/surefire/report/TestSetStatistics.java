@@ -61,12 +61,12 @@ public class TestSetStatistics
         skipped += 1;
     }
 
-    public synchronized void setFailure(boolean failure) {
-    	isFailure = failure;
+    public synchronized void setFailure() {
+    	isFailure = true;
     }
 
-    public synchronized void setTimeout(boolean timeout) {
-    	isTimeout = timeout;
+    public synchronized void setTimeout() {
+    	isTimeout = true;
     }
     
     public synchronized boolean hadFailures()

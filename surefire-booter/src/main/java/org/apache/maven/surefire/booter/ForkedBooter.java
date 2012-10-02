@@ -41,6 +41,23 @@ import org.apache.maven.surefire.suite.RunResult;
 public class ForkedBooter
 {
 
+  public static boolean getBooleanSystemProperty(final String propertyName, final boolean defaultValue) {
+    final String value = System.getProperty(propertyName);
+    if (value == null) {
+      return defaultValue;
+    } else {
+      return Boolean.parseBoolean(value);
+    } 
+  } 
+  
+  /**
+   * Denies calls of {@link System#exit(int)}), {@link Runtime#exit(int)}), {@link Runtime#halt(int)} by installing corresponding {@link SecurityManager}.
+   * If denied, a security exception will be logged and thrown instead of the actual method call.
+   * NB: this System property is checked *before* the test System properties are read from the file and set,
+   * so, it should be passed in pom.xml though <argLine> -D...=...</argLine> construct, but not through any other means.   
+   */
+  private static final boolean denySystemExit = getBooleanSystemProperty("security-deny-system-exit", false);
+  
     /**
      * This method is invoked when Surefire is forked - this method parses and organizes the arguments passed to it and
      * then calls the Surefire class' run method. <p/> The system exit code will be 1 if an exception is thrown.
@@ -49,43 +66,35 @@ public class ForkedBooter
      * @throws Throwable Upon throwables
      */
     public static void main( final String[] args )
-        throws Throwable
     {
         final PrintStream originalOut = System.out;
         final PrintStream originalErr = System.err;
         
-    	final SecurityManager originalSecurityManager = System.getSecurityManager();
+        boolean customSecurityManagerSet = false;
+    	  final SecurityManager originalSecurityManager = System.getSecurityManager();
         try
         {
-        	final SecurityManager checkExitSecurityManager = new DelegatingSecurityManager(originalSecurityManager) {
-        		//@Override NB: source level
-        		public void checkExit(final int status) {
-        			originalErr.println("The following exception will be thrown right now:");
-        			final RuntimeException re = new SecurityException("ERROR: an attempted detected to perform JVM exit/halt with code ["+status+"]. " +
-            				"Invocation of System#exit(), Runtime#exit(), or Runtime#halt() is not allowed in tests.");
-        			re.printStackTrace(originalErr);
-        			throw re;
-        		}
-//        		//@Override NB: source level
-//        		public void checkPermission(Permission perm) {
-//        			// NB: forbid also to work with the shutdown hooks:
-//        		    // NB: we cannot forbid shutdown hooks since java.util.logging.LogManager.<init>(LogManager.java:236) adds a shutdown hook. 
-//        			if (perm != null && "shutdownHooks".equals(perm.getName())) {
-//            			originalErr.println("The following exception will be thrown right now:");
-//            			final RuntimeException re = new SecurityException("ERROR: an attempted detected to add or remove a shutdown hook. This is not allowed in tests.");
-//            			re.printStackTrace(originalErr);
-//            			throw re;
-//        			} 
-//        			super.checkPermission(perm);
-//        		}
-        	};
-        	System.setSecurityManager(checkExitSecurityManager);
-        	// ---------------------
-        	
-            if ( args.length > 1 )
-            {
-                SystemPropertyManager.setSystemProperties( new File( args[1] ) );
-            }
+          originalErr.println(" "+ForkedBooter.class.getName()+": denySystemExit = " + denySystemExit);
+          if (denySystemExit) {
+            // NB: we cannot forbid shutdown hooks since java.util.logging.LogManager.<init>(LogManager.java:236) adds a shutdown hook.
+            final SecurityManager checkExitSecurityManager = new DelegatingSecurityManager(originalSecurityManager) {
+              //@Override NB: source level
+              public void checkExit(final int status) {
+                originalErr.println("The following exception will be thrown right now:");
+                final RuntimeException re = new SecurityException("ERROR: an attempted detected to perform JVM exit/halt with code ["+status+"]. " +
+                    "Invocation of System#exit(), Runtime#exit(), or Runtime#halt() is not allowed in tests.");
+                re.printStackTrace(originalErr);
+                throw re;
+              }
+            };
+            System.setSecurityManager(checkExitSecurityManager);
+            customSecurityManagerSet = true;
+          }
+          
+          if ( args.length > 1 )
+          {
+              SystemPropertyManager.setSystemProperties( new File( args[1] ) );
+          }
 
             File surefirePropertiesFile = new File( args[0] );
             InputStream stream = surefirePropertiesFile.exists() ? new FileInputStream( surefirePropertiesFile ) : null;
@@ -108,7 +117,9 @@ public class ForkedBooter
             originalOut.flush();
             
             // noinspection CallToSystemExit
-            System.setSecurityManager(originalSecurityManager);
+            if (customSecurityManagerSet) {
+              System.setSecurityManager(originalSecurityManager);
+            }
             System.exit( 0 );
         }
         catch ( Throwable t )
@@ -123,7 +134,9 @@ public class ForkedBooter
         	originalErr.println("########################## "+ForkedBooter.class.getName()+": Terminating the forked JVM with status ["+exitCode+"].");
             originalErr.flush();
             
-            System.setSecurityManager(originalSecurityManager);
+            if (customSecurityManagerSet) {
+              System.setSecurityManager(originalSecurityManager);
+            }
             System.exit( exitCode );
         }
     }

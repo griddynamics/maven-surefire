@@ -314,37 +314,40 @@ public class TestSetRunListener
         return stringBuffer.toString();
     }
     
-    public synchronized void timeout(final int timeoutSeconds) {
-    	if (testSetIsRunning.compareAndSet(true, false)) {
-    		//System.out.println(this + " ====== timing out....");
-    		final Iterator<Entry<String,String>> it = testCaseMap.entrySet().iterator();
-    		final String source;
-    		final String name;
-    		if (it.hasNext()) {
-        		final Entry<String,String> e = it.next();
-//        		if (it.hasNext()) {
-//        			throw new AssertionError("More than 1 test is running.");
-//        		}
-        		final String runningTest = e.getKey();
-        		int hashPos = runningTest.indexOf('#');
-        		source = runningTest.substring(0, hashPos);
-        		name = runningTest.substring(hashPos + 1);
-    		} else {
-    			System.out.println("WARN: the test set is timed out while no test-case is being executed.");
-    			source = "" + currentTestClassName; // null protection
-    			name = "anUnknownTestMethod("+source+")";
-    			//throw new AssertionError("No test is running -- nothing to timeout.");
-    		}
-    		final String message = "Test timed out after "+timeoutSeconds+" seconds.";
-    		final StackTraceWriter stw = new PojoStackTraceWriter(null, null, new TimeoutException(message));
-    		final ReportEntry entry = new SimpleReportEntry(source, name, stw);
-    		testErrorImpl(entry, false);
-    		// ReportEntry entry2 = new SimpleReportEntry(source, name, "Test case ["+runningTest+"] timed out after "+timeoutSeconds+" seconds. ");
-    		testSetCompletedImpl(entry, false);
-    	} else {
-    		System.out.println("WARN: test set already timed out or completed.");
-    	}
+    public synchronized void timeout(final Exception ex) {
+      finishWithErrorImpl(ex);
+      globalStatistics.setTimeout();
     }
+
+    public synchronized void failure(final String message) {
+      finishWithErrorImpl(new RuntimeException(message));
+      globalStatistics.setFailure();
+    }
+    
+    private void finishWithErrorImpl(final Exception exception) {
+      if (testSetIsRunning.compareAndSet(true, false)) {
+        final Iterator<Entry<String,String>> it = testCaseMap.entrySet().iterator();
+        final String source;
+        final String name;
+        if (it.hasNext()) {
+            final Entry<String,String> e = it.next();
+            final String runningTest = e.getKey();
+            int hashPos = runningTest.indexOf('#');
+            source = runningTest.substring(0, hashPos);
+            name = runningTest.substring(hashPos + 1);
+        } else {
+          System.out.println("WARN: the test set is timed out while no test-case is being executed.");
+          source = "" + currentTestClassName; // null protection
+          name = "anUnknownTestMethod("+source+")";
+        }
+        final StackTraceWriter stw = new PojoStackTraceWriter(null, null, exception);
+        final ReportEntry entry = new SimpleReportEntry(source, name, stw);
+        testErrorImpl(entry, false);
+        testSetCompletedImpl(entry, false);
+      } else {
+        System.out.println("WARN: test set already timed out or completed.");
+      }
+    } 
     
     private String getTestKey(ReportEntry entry) {
     	// FQN of the test case:

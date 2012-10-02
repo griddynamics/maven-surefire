@@ -52,7 +52,6 @@ import org.codehaus.plexus.util.cli.CommandLineException;
 import org.codehaus.plexus.util.cli.CommandLineTimeOutException;
 import org.codehaus.plexus.util.cli.CommandLineUtils;
 import org.codehaus.plexus.util.cli.Commandline;
-import org.codehaus.plexus.util.cli.DefaultConsumer;
 
 
 /**
@@ -68,10 +67,40 @@ import org.codehaus.plexus.util.cli.DefaultConsumer;
  * @author Dan Fabulich
  * @author Carlos Sanchez
  * @author Kristian Rosenvold
- * @version $Id$
+ * @version $Id: ForkStarter.java 1236422 2012-01-26 22:37:06Z krosenvold $
  */
 public class ForkStarter
 {
+  /**
+   * Property that indicates that the test run should be stopped upon first execution failure.
+   * ("Failure" above means not a test failure, but a test execution failure, which typically 
+   * means some abnormal exit of a test or an error of the test engine itself.)
+   * This value is 'false' by default;
+   * The value can be re-defined by passing the property to Maven executable via the -D key.  
+   */
+  private static final boolean stopOnExecutionFailure 
+    = getBooleanSystemProperty("stop-on-execution-failure", false);
+  /**
+   * Property that indicates that an abnormal termination of a forked test process is to be treated only 
+   * as the test error. Abnormal termination is either non-zero exit code of the forked process, or  
+   * (in case of zero exit code) incorrect termination without corresponding closing message.   
+   * 'true' value means that the the last executed test just receives Error status with appropriate message;
+   * 'false' value means that the last executed test receives Error status with appropriate message, plus
+   *   the problem is reported as an execution error.   
+   * The value can be re-defined by passing the property to Maven executable via the -D key.  
+   */
+  private static final boolean treatAbnormalForkedProcessExitAsTestErrorOnly 
+    = getBooleanSystemProperty("treat-abnormal-forked-process-exit-as-test-error-only", true);
+  
+  public static boolean getBooleanSystemProperty(final String propertyName, final boolean defaultValue) {
+    final String value = System.getProperty(propertyName);
+    if (value == null) {
+      return defaultValue;
+    } else {
+      return Boolean.parseBoolean(value);
+    } 
+  } 
+  
     private final int forkedProcessTimeoutInSeconds;
 
     private final ProviderConfiguration providerConfiguration;
@@ -85,9 +114,6 @@ public class ForkStarter
     private final FileReporterFactory fileReporterFactory;
 
     private static volatile int systemPropertiesFileCounter = 0;
-
-    //private static final Object lock = new Object();
-
 
     public ForkStarter( ProviderConfiguration providerConfiguration, StartupConfiguration startupConfiguration,
                         ForkConfiguration forkConfiguration, int forkedProcessTimeoutInSeconds,
@@ -140,7 +166,7 @@ public class ForkStarter
         throws SurefireBooterForkException
     {
 
-        final ArrayList<Future<RunResult>> results = new ArrayList<Future<RunResult>>( 500 );
+        final ArrayList<Future<RunResult>> resultFutures = new ArrayList<Future<RunResult>>( 500 );
         final ExecutorService executorService = new ThreadPoolExecutor( forkCount, forkCount, 60, TimeUnit.SECONDS,
                                                                   new ArrayBlockingQueue<Runnable>( 500 ) );
 
@@ -168,28 +194,25 @@ public class ForkStarter
                 if (future == null) {
                 	throw new AssertionError("Future cannot be null.");
                 }
-                results.add(future);
+                resultFutures.add(future);
             }
 
-            System.out.println("########### " + results.size() + " test set tasks submitted for execution." );
+            System.out.println("########### " + resultFutures.size() + " test set tasks submitted for execution." );
             int obtainedResultCount = 0;
-            for ( final Future<RunResult> result: results )
+            for ( final Future<RunResult> resultFuture: resultFutures )
             {
                 try
                 {
-                    final RunResult current = result.get();
+                    final RunResult current = resultFuture.get();
                     if ( current != null )
                     {
-                    	obtainedResultCount++;
-                        //System.out.println("# global    result: #"+obtainedResultCount+": " + toDebugString(globalResult) );
-                        System.out.println("##### Results so far: #"+obtainedResultCount+": " + toDebugString(current) );
-                        //globalResult = globalResult.aggregate( current );
-                        globalResult = current;
-                        //System.out.println("# global + current: #"+obtainedResultCount+": " + toDebugString(globalResult) );
+                      obtainedResultCount++;
+                      System.out.println("##### Results so far: #"+obtainedResultCount+": " + toDebugString(current) );
+                      globalResult = current;
                     }
                     else
                     {
-                        throw new SurefireBooterForkException( "No results for " + result.toString() );
+                      throw new SurefireBooterForkException( "No results for " + resultFuture.toString() );
                     }
                 }
                 catch ( InterruptedException e )
@@ -203,15 +226,17 @@ public class ForkStarter
             }
             return globalResult;
         } catch (final Throwable t) {
-        	System.out.println("############################################### FATAL ERROR: ");
+        	System.out.println("############################################### ERROR: ");
         	t.printStackTrace(System.out); // log the error -- make it visible in the log for sure.
-        	// cancel all the remaining tasks:
-        	System.out.println("Forcibly shutting down the executor service...");
-        	final List<Runnable> awaitingList = executorService.shutdownNow();
-        	if (awaitingList != null) {
-        		System.out.println("Cancelled execution of "+awaitingList.size()+" remaining test sets (+ possibly the current one).");
+        	if (stopOnExecutionFailure) {
+        	  // cancel all the remaining tasks:
+        	  System.out.println("Forcibly shutting down the executor service...");
+        	  final List<Runnable> awaitingList = executorService.shutdownNow();
+        	  if (awaitingList != null) {
+        	    System.out.println("Cancelled execution of "+awaitingList.size()+" remaining test sets (+ possibly the current one).");
+        	  }
         	}
-        	throw new SurefireBooterForkException("Fatal error while executing tests:", t);
+        	throw new SurefireBooterForkException("Error while executing tests:", t);
         } finally {
         	// NB: this will wait for all the remaining tasks to complete:
             closeExecutor( executorService );
@@ -309,36 +334,55 @@ public class ForkStarter
         try
         {
             final int timeout = (forkedProcessTimeoutInSeconds > 0) ? forkedProcessTimeoutInSeconds : 0;
-            final int result =
+            final int processExitCode =
                 CommandLineUtils.executeCommandLine( cli, threadedStreamConsumer, threadedStreamConsumer, timeout );
 
             // wait for the buffered streamer to put everything to the forkClient (actual consumer):
             threadedStreamConsumer.close();
             
-            if ( result == RunResult.SUCCESS ) {
-            	forkClient.close(true); // NB: require goodbye: exception thrown from there if no "BYE" message was sent by the ForkedBooter.
+            final String errorMessage;
+            if (processExitCode == 0) {
+              final boolean isCorrectlyFinished = forkClient.isCorrectlyFinished();
+              if (isCorrectlyFinished) {
+                errorMessage = null;
+              } else {
+                errorMessage = "The forked VM terminated with zero exit code, but without saying properly goodbye. VM crash or System.exit() called?";
+              }
             } else {
-            	forkClient.close(false);
-                throw new SurefireBooterForkException( "Error occurred in starting fork, check output in the test log. Process exit code = "+result );
+              errorMessage = "Forked process exited with non-zero code = "+processExitCode;
             }
-
+            
+            if (errorMessage != null) {
+              System.out.println("##### Test execution failure: ["+errorMessage+"]");
+              // in this case mark the last executed test as Error:
+              forkClient.failure(errorMessage);
+            }
+            
+            forkClient.close();
+            
+            if (errorMessage != null && !treatAbnormalForkedProcessExitAsTestErrorOnly) {
+              // report this failure as booter fork failure:
+              throw new SurefireBooterForkException( errorMessage );
+            }
+            
             runResult = globalRunStatistics.getRunResult();
         }
-        catch ( CommandLineTimeOutException e )
+        catch (final CommandLineTimeOutException e )
         { 
             // wait for the buffered streamer to put everything to the forkClient (actual consumer):
             threadedStreamConsumer.close();
-            // NB: ask the forkClient to complete the running test set and set appropriate statuses:
-            forkClient.timeout(forkedProcessTimeoutInSeconds);
-            globalRunStatistics.setTimeout(true); // NB: indicate that a timeout happened.
-            forkClient.close(false);
+            // NB: ask the forkClient to complete the running test set and set appropriate statuses.
+            // NB: the global statistics will be updated with the "timeout" status in this call:
+            forkClient.timeout(e);
+            forkClient.close();
             runResult = globalRunStatistics.getRunResult();
         }
         catch ( CommandLineException e )
         {
             // wait for the buffered streamer to put everything to the forkClient (actual consumer):
             threadedStreamConsumer.close();
-            forkClient.close(false); // just a cleanup in this case
+            globalRunStatistics.setFailure(); // indicate runner failure to the global statistics.
+            forkClient.close(); // just a cleanup in this case
             // fail:
             throw new SurefireBooterForkException( "Error while executing forked tests.", e.getCause() );
         }
