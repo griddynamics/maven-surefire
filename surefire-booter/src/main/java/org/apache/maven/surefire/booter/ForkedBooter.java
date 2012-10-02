@@ -23,6 +23,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.security.Permission;
+
 import org.apache.maven.surefire.suite.RunResult;
 
 /**
@@ -46,12 +48,40 @@ public class ForkedBooter
      * @param args Commandline arguments
      * @throws Throwable Upon throwables
      */
-    public static void main( String[] args )
+    public static void main( final String[] args )
         throws Throwable
     {
         final PrintStream originalOut = System.out;
+        final PrintStream originalErr = System.err;
+        
+    	final SecurityManager originalSecurityManager = System.getSecurityManager();
         try
         {
+        	final SecurityManager checkExitSecurityManager = new DelegatingSecurityManager(originalSecurityManager) {
+        		//@Override NB: source level
+        		public void checkExit(final int status) {
+        			originalErr.println("The following exception will be thrown right now:");
+        			final RuntimeException re = new SecurityException("ERROR: an attempted detected to perform JVM exit/halt with code ["+status+"]. " +
+            				"Invocation of System#exit(), Runtime#exit(), or Runtime#halt() is not allowed in tests.");
+        			re.printStackTrace(originalErr);
+        			throw re;
+        		}
+//        		//@Override NB: source level
+//        		public void checkPermission(Permission perm) {
+//        			// NB: forbid also to work with the shutdown hooks:
+//        		    // NB: we cannot forbid shutdown hooks since java.util.logging.LogManager.<init>(LogManager.java:236) adds a shutdown hook. 
+//        			if (perm != null && "shutdownHooks".equals(perm.getName())) {
+//            			originalErr.println("The following exception will be thrown right now:");
+//            			final RuntimeException re = new SecurityException("ERROR: an attempted detected to add or remove a shutdown hook. This is not allowed in tests.");
+//            			re.printStackTrace(originalErr);
+//            			throw re;
+//        			} 
+//        			super.checkPermission(perm);
+//        		}
+        	};
+        	System.setSecurityManager(checkExitSecurityManager);
+        	// ---------------------
+        	
             if ( args.length > 1 )
             {
                 SystemPropertyManager.setSystemProperties( new File( args[1] ) );
@@ -76,16 +106,25 @@ public class ForkedBooter
             // Say bye.
             originalOut.println( "Z,0,BYE!" );
             originalOut.flush();
+            
             // noinspection CallToSystemExit
+            System.setSecurityManager(originalSecurityManager);
             System.exit( 0 );
         }
         catch ( Throwable t )
         {
             // Just throwing does getMessage() and a local trace - we want to call printStackTrace for a full trace
             // noinspection UseOfSystemOutOrSystemErr
-            t.printStackTrace( System.err );
+        	originalErr.println("########################## "+ForkedBooter.class.getName()+": FATAL: A throwable caught:");
+            t.printStackTrace( originalErr );
+            originalErr.flush();
             // noinspection ProhibitedExceptionThrown,CallToSystemExit
-            System.exit( 1 );
+            final int exitCode = 77;
+        	originalErr.println("########################## "+ForkedBooter.class.getName()+": Terminating the forked JVM with status ["+exitCode+"].");
+            originalErr.flush();
+            
+            System.setSecurityManager(originalSecurityManager);
+            System.exit( exitCode );
         }
     }
 
@@ -111,5 +150,22 @@ public class ForkedBooter
         final Boolean trimStackTrace = providerConfiguration.getReporterConfiguration().isTrimStackTrace();
         final PrintStream originalSystemOut = providerConfiguration.getReporterConfiguration().getOriginalSystemOut();
         return surefireReflector.createForkingReporterFactory( trimStackTrace, originalSystemOut );
+    }
+    
+    private static class DelegatingSecurityManager extends SecurityManager {
+    	private final SecurityManager delegate; 
+    	public DelegatingSecurityManager(SecurityManager sm) {
+			delegate = sm;
+		}
+		public void checkPermission(Permission perm) {
+			if (delegate != null) {
+				delegate.checkPermission(perm);
+			}
+		}
+		public void checkPermission(Permission perm, Object context) {
+			if (delegate != null) {
+				delegate.checkPermission(perm, context);
+			}
+		}
     }
 }
