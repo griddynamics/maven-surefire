@@ -103,4 +103,9 @@ public interface Reporter
      * same thread.
      */
     void reset();
+    
+    /**
+     * Closes all the resources (e.g. output streams, files) associated with the report.
+     */
+    void closeReport();
 }

@@ -95,4 +95,9 @@ public class StatisticsReporter
     public void reset()
     {
     }
+    
+    //@Override 1.5
+    public void closeReport() {
+      // noop
+    }
 }

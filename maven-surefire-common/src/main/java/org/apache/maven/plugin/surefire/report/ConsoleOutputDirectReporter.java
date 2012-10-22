@@ -80,4 +80,9 @@ public class ConsoleOutputDirectReporter
     public void reset()
     {
     }
+    
+    @Override
+    public void closeReport() {
+      // noop
+    }
 }

@@ -170,4 +170,8 @@ public class FileReporterFactory
     {
         return new FileReporterFactory( StartupReportConfiguration.defaultNoXml() );
     }
+    
+    public int[] getAllChannelIds() {
+      return null;
+    }
 }

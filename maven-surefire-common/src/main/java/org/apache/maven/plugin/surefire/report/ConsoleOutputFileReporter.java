@@ -68,11 +68,7 @@ public class ConsoleOutputFileReporter
     public void testSetCompleted( ReportEntry report )
         throws ReporterException
     {
-        if ( printWriter != null )
-        {
-            printWriter.close();
-            printWriter = null;
-        }
+      closeReport();
     }
 
     public void writeMessage( byte[] b, int off, int len )
@@ -88,16 +84,16 @@ public class ConsoleOutputFileReporter
                 }
                 File file = AbstractFileReporter.getReportFile( reportsDirectory, reportEntryName, reportNameSuffix,
                                                                 "-output.txt" );
-                printWriter = new PrintWriter( new BufferedWriter( new FileWriter( file ) ) );
+                printWriter = new PrintWriter( new BufferedWriter( new FileWriter( file, true/*append*/ ) ) );
             }
             printWriter.write( new String( b, off, len ) );
+            printWriter.flush();
         }
         catch ( IOException e )
         {
             throw new NestedRuntimeException( e );
         }
     }
-
 
     public void testStarting( ReportEntry report )
     {
@@ -125,5 +121,12 @@ public class ConsoleOutputFileReporter
 
     public void reset()
     {
+    }
+    
+    public void closeReport() {
+      if (printWriter != null) {
+        printWriter.close();
+        printWriter = null;
+      }
     }
 }

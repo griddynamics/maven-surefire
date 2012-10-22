@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.maven.plugin.surefire.runorder.StatisticsReporter;
@@ -352,5 +351,10 @@ public class TestSetRunListener
     private String getTestKey(ReportEntry entry) {
     	// FQN of the test case:
     	return entry.getSourceName() + "#" + entry.getName();
+    }
+    
+    public void closeReport() {
+      // delegate to the multicasting reporter:
+      multicastingReporter.closeReport();
     }
 }

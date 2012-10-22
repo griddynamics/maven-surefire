@@ -53,6 +53,12 @@ import org.codehaus.plexus.util.cli.StreamConsumer;
 public class ForkClient
     implements StreamConsumer
 {
+   /*
+    * This message will be written ion the end of each test set output file.
+    * The purpose is to ensure that the file is fully written, not truncated somehow.  
+    */
+    private static final byte[] finalMessageBytes = "===== END OF TEST SET OUTPUT =====".getBytes();
+  
     private final ReporterFactory providerReporterFactory;
 
     private final Map<Integer, RunListener> testSetReporters =
@@ -66,6 +72,16 @@ public class ForkClient
     {
         this.providerReporterFactory = providerReporterFactory;
         this.testVmSystemProperties = testVmSystemProperties;
+    }
+    
+    private RunListener lazyGetRunListener(final Integer channelNumber, boolean doLazyInit) {
+      RunListener runListener = testSetReporters.get( channelNumber );
+      if (runListener == null && doLazyInit)
+      {
+        runListener = providerReporterFactory.createReporter();
+        testSetReporters.put( channelNumber, runListener );
+      }
+      return runListener;
     }
 
     public void consumeLine( final String s )
@@ -83,22 +99,14 @@ public class ForkClient
                 System.out.println( s );
                 return;
             }
-            RunListener runListener = null;
-            final String remaining;
+            final Integer channelNumber = Integer.parseInt( s.substring( 2, commma ), 16 );
+            final int rest = s.indexOf( ",", commma );
+            final String remaining = s.substring( rest + 1 );
+            final RunListener runListener;
             if (operationId == ForkingRunListener.BOOTERCODE_BYE) {
-            	// we don't need the runListener and the line in this case:
-            	remaining = null;
+              runListener = lazyGetRunListener(channelNumber, false);
             } else {
-            	final Integer channelNumber = Integer.parseInt( s.substring( 2, commma ), 16 );
-            	runListener = testSetReporters.get( channelNumber );
-            	if ( runListener == null )
-            	{
-            		runListener = providerReporterFactory.createReporter();
-            		// reporter = new AsynchRunListener( reporter, "ForkClient" );
-            		testSetReporters.put( channelNumber, runListener );
-            	}
-            	int rest = s.indexOf( ",", commma );
-            	remaining = s.substring( rest + 1 );
+            	runListener = lazyGetRunListener(channelNumber, true);
             }
             switch ( operationId )
             {
@@ -204,9 +212,10 @@ public class ForkClient
             final StackTraceWriter stackTraceWriter =
                 tokens.hasMoreTokens() ? deserializeStackStraceWriter( tokens ) : null;
 
-            return group != null
+            final ReportEntry reportEntry = (group != null)
                 ? new CategorizedReportEntry( source, name, group, stackTraceWriter, elapsed, message )
                 : new SimpleReportEntry( source, name, stackTraceWriter, elapsed, message );
+            return reportEntry;    
         }
         catch ( RuntimeException e )
         {
@@ -255,13 +264,21 @@ public class ForkClient
     public boolean isCorrectlyFinished() {
       return saidGoodBye;
     } 
-
+    
     public void close()
     {
-      testSetReporters.clear(); // just a cleanup
-//      if (requireGoodBye && !saidGoodBye){
-//        throw new RuntimeException( "The forked VM terminated without saying properly goodbye. VM crash or System.exit() called?" );
-//      }
+      // 1. should signal all the reporters to close the test output:
+      final Collection<RunListener> runListeners = testSetReporters.values();
+      for (RunListener rl: runListeners) {
+        if (rl instanceof TestSetRunListener) {
+          // XXX: casting.  
+          ((TestSetRunListener)rl).writeMessage(finalMessageBytes, 0, finalMessageBytes.length);
+          // NB: close the output streams: 
+          ((TestSetRunListener)rl).closeReport();
+        }
+      }
+      // 2. just a cleanup:
+      testSetReporters.clear(); 
     }
     
     /**
@@ -271,7 +288,7 @@ public class ForkClient
     public void timeout(final Exception exception) {
     	final Collection<RunListener> runListeners = testSetReporters.values();
     	for (RunListener rl: runListeners) {
-    		// XXX: need to cast it there, think to add #timeout(int) to the interface.  
+    		// XXX: casting.  
     		if (rl instanceof TestSetRunListener) {
     			((TestSetRunListener)rl).timeout(exception);
     		}
@@ -281,7 +298,7 @@ public class ForkClient
     public void failure(final String errMessage) {
       final Collection<RunListener> runListeners = testSetReporters.values();
       for (RunListener rl: runListeners) {
-        // XXX: need to cast it there.  
+        // XXX: casting.  
         if (rl instanceof TestSetRunListener) {
           ((TestSetRunListener)rl).failure(errMessage);
         }

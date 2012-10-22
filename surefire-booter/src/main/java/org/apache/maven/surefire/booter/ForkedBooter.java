@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.security.Permission;
 
+import org.apache.maven.surefire.report.ReporterFactory;
 import org.apache.maven.surefire.suite.RunResult;
 
 /**
@@ -57,6 +58,8 @@ public class ForkedBooter
    * so, it should be passed in pom.xml though <argLine> -D...=...</argLine> construct, but not through any other means.   
    */
   private static final boolean denySystemExit = getBooleanSystemProperty("security-deny-system-exit", false);
+
+  private static ReporterFactory reporterFactory;
   
     /**
      * This method is invoked when Surefire is forked - this method parses and organizes the arguments passed to it and
@@ -74,8 +77,8 @@ public class ForkedBooter
     	  final SecurityManager originalSecurityManager = System.getSecurityManager();
         try
         {
-          originalErr.println(" "+ForkedBooter.class.getName()+": denySystemExit = " + denySystemExit);
           if (denySystemExit) {
+            originalErr.println(" "+ForkedBooter.class.getName()+": denySystemExit = " + denySystemExit);
             // NB: we cannot forbid shutdown hooks since java.util.logging.LogManager.<init>(LogManager.java:236) adds a shutdown hook.
             final SecurityManager checkExitSecurityManager = new DelegatingSecurityManager(originalSecurityManager) {
               //@Override NB: source level
@@ -110,11 +113,18 @@ public class ForkedBooter
 
             startupConfiguration.writeSurefireTestClasspathProperty();
 
-            Object testSet = forkedTestSet != null ? forkedTestSet.getDecodedValue( testClassLoader ) : null;
-            runSuitesInProcess( testSet, testClassLoader, startupConfiguration, providerConfiguration );
-            // Say bye.
-            originalOut.println( "Z,0,BYE!" );
-            originalOut.flush();
+            final Object testSet = forkedTestSet != null ? forkedTestSet.getDecodedValue( testClassLoader ) : null;
+            runSuitesInProcess( testSet, testClassLoader, startupConfiguration, providerConfiguration);
+            
+            final int[] channelIds = getChannelIds();
+            if (channelIds != null && channelIds.length > 0) {
+              for (int i=0; i<channelIds.length; i++) {
+                sayBye(originalOut, channelIds[i]);
+              }
+            } else { 
+              originalErr.println("WARN: no channel ID found to say good bye. As a fallback saying goodbye to channel 0.");
+              sayBye(originalOut, 0);
+            } 
             
             // noinspection CallToSystemExit
             if (customSecurityManagerSet) {
@@ -141,6 +151,19 @@ public class ForkedBooter
         }
     }
 
+    private static int[] getChannelIds() {
+      if (reporterFactory == null) {
+        return null;
+      }
+      return reporterFactory.getAllChannelIds();
+    }
+
+    private static void sayBye(final PrintStream ps, final int channel) {
+      // Say bye:
+      ps.println( "Z,"+channel+",BYE!" );
+      ps.flush();
+    }
+    
     public static RunResult runSuitesInProcess( Object testSet, ClassLoader testsClassLoader,
                                                 StartupConfiguration startupConfiguration,
                                                 ProviderConfiguration providerConfiguration )
@@ -153,6 +176,12 @@ public class ForkedBooter
 
         final Object factory = createForkingReporterFactory( surefireReflector, providerConfiguration );
 
+        if (factory instanceof ReporterFactory) {
+          reporterFactory = (ReporterFactory)factory;
+        } else {
+          reporterFactory = null;
+        }
+        
         return ProviderFactory.invokeProvider( testSet, testsClassLoader, surefireClassLoader, factory,
                                                providerConfiguration, true, startupConfiguration );
     }

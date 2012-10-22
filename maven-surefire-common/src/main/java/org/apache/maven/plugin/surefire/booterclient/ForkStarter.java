@@ -182,7 +182,7 @@ public class ForkStarter
                     new ForkClient( fileReporterFactory, startupReportConfiguration.getTestVmSystemProperties() );
                 final Callable<RunResult> pf = new Callable<RunResult>()
                 {
-                	@Override
+                	//@Override NB: source=1.5
                     public RunResult call()
                         throws Exception
                     {
@@ -358,6 +358,7 @@ public class ForkStarter
               forkClient.failure(errorMessage);
             }
             
+            // NB: the test console output will be finally closed there:
             forkClient.close();
             
             if (errorMessage != null && !treatAbnormalForkedProcessExitAsTestErrorOnly) {

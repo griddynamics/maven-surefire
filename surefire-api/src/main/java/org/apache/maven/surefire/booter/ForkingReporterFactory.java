@@ -20,6 +20,9 @@ package org.apache.maven.surefire.booter;
  */
 
 import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.maven.surefire.report.ReporterFactory;
 import org.apache.maven.surefire.report.RunListener;
 import org.apache.maven.surefire.report.RunStatistics;
@@ -42,6 +45,8 @@ public class ForkingReporterFactory
     private final PrintStream originalSystemOut;
 
     private volatile int testSetChannelId = 1;
+    
+    private final List channelIdList = new ArrayList(4);
 
     public ForkingReporterFactory( Boolean trimstackTrace, PrintStream originalSystemOut )
     {
@@ -51,7 +56,10 @@ public class ForkingReporterFactory
 
     public synchronized RunListener createReporter()
     {
-        return new ForkingRunListener( originalSystemOut, testSetChannelId++, isTrimstackTrace.booleanValue() );
+      final int id = testSetChannelId;
+      testSetChannelId++;
+      channelIdList.add(Integer.valueOf(id));
+      return new ForkingRunListener( originalSystemOut, id, isTrimstackTrace.booleanValue() );
     }
 
     public RunResult close()
@@ -64,4 +72,11 @@ public class ForkingReporterFactory
         return new RunStatistics();
     }
 
+    public int[] getAllChannelIds() {
+      final int[] result = new int[channelIdList.size()];
+      for (int i=0; i<channelIdList.size(); i++) {
+        result[i] = ((Integer)channelIdList.get(i)).intValue();
+      }
+      return result;
+    }
 }

@@ -209,4 +209,9 @@ public abstract class AbstractReporter
             reportFile.delete();
         }
     }
+    
+    @Override
+    public void closeReport() {
+      // abstract implementation does nothing
+    }
 }

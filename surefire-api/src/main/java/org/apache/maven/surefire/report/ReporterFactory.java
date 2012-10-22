@@ -42,4 +42,6 @@ public interface ReporterFactory
     RunResult close();
 
     RunStatistics getGlobalRunStatistics();
+    
+    int[] getAllChannelIds();  
 }
