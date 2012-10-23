@@ -72,6 +72,7 @@ public class ConsoleOutputFileReporter
             printWriter = null;
         }
     }
+
     public void writeTestOutput( byte[] buf, int off, int len, boolean stdout )
     {
         try
@@ -85,9 +86,10 @@ public class ConsoleOutputFileReporter
                 }
                 File file =
                     FileReporter.getReportFile( reportsDirectory, reportEntryName, reportNameSuffix, "-output.txt" );
-                printWriter = new PrintWriter( new BufferedWriter( new FileWriter( file ) ) );
+                printWriter = new PrintWriter( new BufferedWriter( new FileWriter( file, true/*append*/ ) ) );
             }
             printWriter.write( new String( buf, off, len ) );
+            printWriter.flush();
         }
         catch ( IOException e )
         {

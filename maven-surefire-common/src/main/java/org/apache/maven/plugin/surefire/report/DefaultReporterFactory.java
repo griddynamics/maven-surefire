@@ -101,11 +101,11 @@ public class DefaultReporterFactory
     {
         final DefaultDirectConsoleReporter logger = createConsoleLogger();
         logger.info( "" );
-        logger.info( "Results :" );
+        logger.info( "########## Results :" );
         logger.info( "" );
         if ( globalStats.hadFailures() )
         {
-            multicastingReporter.writeMessage( "Failed tests: " );
+            multicastingReporter.writeMessage( "Failed tests: \n" );
             for ( Object o : this.globalStats.getFailureSources() )
             {
                 logger.info( "  " + o );
@@ -121,6 +121,17 @@ public class DefaultReporterFactory
             }
             logger.info( "" );
         }
+        // NB: also write down the info about the skipped tests:
+        final int skipped = globalStats.getSkipped();
+        if (skipped > 0) {
+           logger.info( "Skipped tests: " );
+           for (Object o: globalStats.getSkippedSources() )
+           {
+               logger.info( "  " + o );
+           }
+           logger.info( "" );
+        }
+        
         logger.info( globalStats.getSummary() );
         logger.info( "" );
     }
@@ -133,5 +144,9 @@ public class DefaultReporterFactory
     public static DefaultReporterFactory defaultNoXml()
     {
         return new DefaultReporterFactory( StartupReportConfiguration.defaultNoXml() );
+    }
+    
+    public int[] getAllChannelIds() {
+      return null;
     }
 }

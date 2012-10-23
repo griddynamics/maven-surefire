@@ -40,11 +40,16 @@ public class RunStatistics {
      * Holds the source(s) that causes the failure(s).
      */
     private final Sources failureSources = new Sources();
+    
+    private final Sources skippedSources = new Sources();
+    
     private int completedCount;
     private int errors;
     private int failures;
     private int skipped;
-
+    
+    private boolean executionFailure;
+    private boolean executionTimeout;
 
     public void addErrorSource( String errorSource, StackTraceWriter stackTraceWriter )
     {
@@ -55,6 +60,12 @@ public class RunStatistics {
     {
         failureSources.addSource( failureSource, stackTraceWriter );
     }
+    
+    public void addSkippedSource( String skippedSource, StackTraceWriter stackTraceWriter )
+    {
+        skippedSources.addSource( skippedSource, stackTraceWriter );
+    }
+    
 
     public Collection getErrorSources()
     {
@@ -64,6 +75,11 @@ public class RunStatistics {
     public Collection getFailureSources()
     {
         return failureSources.getListOfSources();
+    }
+
+    public Collection getSkippedSources()
+    {
+        return skippedSources.getListOfSources();
     }
 
     public synchronized boolean hadFailures()
@@ -85,23 +101,27 @@ public class RunStatistics {
     {
         return skipped;
     }
-
+    
     public synchronized void add( TestSetStats testSetStats){
         this.completedCount += testSetStats.getCompletedCount();
         this.errors += testSetStats.getErrors();
         this.failures += testSetStats.getFailures();
         this.skipped += testSetStats.getSkipped();
+        
+        executionFailure |= testSetStats.isExecutionFailure();
+        executionTimeout |= testSetStats.isExecutionTimeout();
     }
 
     public synchronized RunResult getRunResult()
     {
-        return new RunResult( completedCount, errors, failures, skipped );
+        return new RunResult( completedCount, errors, failures, skipped, executionFailure, executionTimeout );
     }
 
     public synchronized String getSummary()
     {
         return "Tests run: " + completedCount + ", Failures: " + failures + ", Errors: " + errors + ", Skipped: "
-            + skipped;
+            + skipped
+            + "\nExecution Failure: " + executionFailure+ ", Timeout: " + executionTimeout;
     }
 
 

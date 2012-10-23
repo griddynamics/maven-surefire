@@ -41,4 +41,5 @@ public interface ReporterFactory
      */
     RunResult close();
 
+    int[] getAllChannelIds();  
 }

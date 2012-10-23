@@ -95,14 +95,18 @@ public class ThreadedStreamConsumer
 
     public void close()
     {
+        if (!thread.isAlive()) {
+           return; // no action if #close() invoked several times.
+        }
         try
         {
             items.add( poison );
             thread.join();
             //noinspection ThrowableResultOfMethodCallIgnored
-            if ( pumper.getInterruptedException() != null )
+            final InterruptedException ie = pumper.getInterruptedException();
+            if ( ie != null )
             {
-                throw pumper.getInterruptedException();
+                throw ie;
             }
         }
         catch ( InterruptedException e )

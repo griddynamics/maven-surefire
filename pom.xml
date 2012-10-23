@@ -29,13 +29,20 @@
 
   <groupId>org.apache.maven.surefire</groupId>
   <artifactId>surefire</artifactId>
-  <version>2.12.3</version>
+  <version>2.12.3-GD</version>
   <packaging>pom</packaging>
 
   <name>SureFire</name>
   <description>Surefire is a test framework project.</description>
   <url>http://maven.apache.org/surefire</url>
   <inceptionYear>2004</inceptionYear>
+
+<distributionManagement>
+  <repository>
+    <id>patched-surefire-and-plexus-utils</id>
+    <url>http://black.calf.lupus.griddynamics.net:8081/nexus/content/repositories/patched-surefire-and-plexus-utils</url>
+  </repository>
+</distributionManagement>
 
   <contributors>
     <contributor>
@@ -114,6 +121,9 @@
     <mavenVersion>2.0.9</mavenVersion>
     <shadedVersion>2.12</shadedVersion>
     <mavenPluginPluginVersion>3.1</mavenPluginPluginVersion>
+    <!-- NB: the version 2.12.3 is using plexus-utils 3.0.5, so
+         we should use 3.0.5-GD: -->
+    <plexus-utils-version>3.0.5-GD</plexus-utils-version>
   </properties>
 
   <dependencyManagement>
@@ -216,7 +226,7 @@
       <dependency>
         <groupId>org.codehaus.plexus</groupId>
         <artifactId>plexus-utils</artifactId>
-        <version>3.0.5</version>
+        <version>${plexus-utils-version}</version>
       </dependency>
       <dependency>
         <groupId>jmock</groupId>

@@ -47,6 +47,9 @@ public class TestSetStats
     private long lastStartAt;
 
     private long elapsedForTestSet;
+    
+    private boolean executionFailure;
+    private boolean executionTimeout;
 
     private final List<WrappedReportEntry> reportEntries = new ArrayList<WrappedReportEntry>();
 
@@ -218,5 +221,21 @@ public class TestSetStats
     public List<WrappedReportEntry> getReportEntries()
     {
         return reportEntries;
+    }
+    
+    public boolean isExecutionFailure() {
+      return executionFailure;
+    }
+    
+    public boolean isExecutionTimeout() {
+      return executionTimeout;
+    }
+    
+    public void setExecutionFailure(boolean executionFailure) {
+      this.executionFailure = executionFailure;
+    }
+    
+    public void setExecutionTimeout(boolean executionTimeout) {
+      this.executionTimeout = executionTimeout;
     }
 }

@@ -23,6 +23,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,14 +31,15 @@ import java.util.Properties;
 import java.util.StringTokenizer;
 
 import org.apache.maven.plugin.surefire.report.DefaultReporterFactory;
+import org.apache.maven.plugin.surefire.report.TestSetRunListener;
 import org.apache.maven.surefire.booter.ForkingRunListener;
 import org.apache.maven.surefire.report.CategorizedReportEntry;
 import org.apache.maven.surefire.report.ConsoleLogger;
 import org.apache.maven.surefire.report.ConsoleOutputReceiver;
 import org.apache.maven.surefire.report.ReportEntry;
 import org.apache.maven.surefire.report.ReporterException;
+import org.apache.maven.surefire.report.ReporterFactory;
 import org.apache.maven.surefire.report.RunListener;
-import org.apache.maven.surefire.report.SimpleReportEntry;
 import org.apache.maven.surefire.report.StackTraceWriter;
 import org.apache.maven.surefire.util.NestedRuntimeException;
 import org.apache.maven.surefire.util.internal.StringUtils;
@@ -51,7 +53,13 @@ import org.codehaus.plexus.util.cli.StreamConsumer;
 public class ForkClient
     implements StreamConsumer
 {
-    private final DefaultReporterFactory providerReporterFactory;
+   /*
+    * This message will be written ion the end of each test set output file.
+    * The purpose is to ensure that the file is fully written, not truncated somehow.  
+    */
+    private static final byte[] finalMessageBytes = "===== END OF TEST SET OUTPUT =====".getBytes();
+  
+    private final ReporterFactory providerReporterFactory;
 
     private final Map<Integer, RunListener> testSetReporters =
         Collections.synchronizedMap( new HashMap<Integer, RunListener>() );
@@ -65,8 +73,18 @@ public class ForkClient
         this.providerReporterFactory = providerReporterFactory;
         this.testVmSystemProperties = testVmSystemProperties;
     }
+    
+    private RunListener lazyGetRunListener(final Integer channelNumber, boolean doLazyInit) {
+      RunListener runListener = testSetReporters.get( channelNumber );
+      if (runListener == null && doLazyInit)
+      {
+        runListener = providerReporterFactory.createReporter();
+        testSetReporters.put( channelNumber, runListener );
+      }
+      return runListener;
+    }
 
-    public void consumeLine( String s )
+    public void consumeLine( final String s )
     {
         try
         {
@@ -82,9 +100,14 @@ public class ForkClient
                 return;
             }
             final Integer channelNumber = Integer.parseInt( s.substring( 2, commma ), 16 );
-            int rest = s.indexOf( ",", commma );
+            final int rest = s.indexOf( ",", commma );
             final String remaining = s.substring( rest + 1 );
-
+            final RunListener runListener;
+            if (operationId == ForkingRunListener.BOOTERCODE_BYE) {
+              runListener = lazyGetRunListener(channelNumber, false);
+            } else {
+            	runListener = lazyGetRunListener(channelNumber, true);
+            }
             switch ( operationId )
             {
                 case ForkingRunListener.BOOTERCODE_TESTSET_STARTING:
@@ -169,7 +192,7 @@ public class ForkClient
         return unescape( remaining );
     }
 
-    private ReportEntry createReportEntry( String untokenized )
+    private ReportEntry createReportEntry( final String untokenized )
     {
         StringTokenizer tokens = new StringTokenizer( untokenized, "," );
         try
@@ -250,13 +273,47 @@ public class ForkClient
         return (ConsoleLogger) getOrCreateReporter( channelNumber );
     }
 
+    public boolean isCorrectlyFinished() {
+      return saidGoodBye;
+    } 
+    
     public void close()
     {
-        if ( !saidGoodBye )
-        {
-            throw new RuntimeException(
-                "The forked VM terminated without saying properly goodbye. VM crash or System.exit called ?" );
+      // 1. should signal all the reporters to close the test output:
+      final Collection<RunListener> runListeners = testSetReporters.values();
+      for (RunListener rl: runListeners) {
+        if (rl instanceof TestSetRunListener) {
+          // XXX: casting.  
+          ((TestSetRunListener)rl).writeTestOutput(finalMessageBytes, 0, finalMessageBytes.length, true/*stdout*/);
+          // NB: close the output streams: 
+          ((TestSetRunListener)rl).close();
         }
+      }
+      // cleanup the listeners: this will avoid 2nd writing in case #close() invoked several times.
+      testSetReporters.clear(); 
     }
-
+    
+    /**
+     * Requests all the run listeners to close the run sessions and mark the lest tests as timed out: 
+     * @param seconds 
+     */
+    public void timeout(final Exception exception) {
+    	final Collection<RunListener> runListeners = testSetReporters.values();
+    	for (RunListener rl: runListeners) {
+    		// XXX: casting.  
+    		if (rl instanceof TestSetRunListener) {
+    			((TestSetRunListener)rl).timeout(exception);
+    		}
+    	}
+    }
+    
+    public void failure(final Exception ex) {
+      final Collection<RunListener> runListeners = testSetReporters.values();
+      for (RunListener rl: runListeners) {
+        // XXX: casting.  
+        if (rl instanceof TestSetRunListener) {
+          ((TestSetRunListener)rl).failure(ex);
+        }
+      }
+    } 
 }
