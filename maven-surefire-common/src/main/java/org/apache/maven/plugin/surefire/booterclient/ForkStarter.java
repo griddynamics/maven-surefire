@@ -22,6 +22,7 @@ package org.apache.maven.plugin.surefire.booterclient;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
@@ -130,10 +131,42 @@ public class ForkStarter
         this.startupReportConfiguration = startupReportConfiguration;
         fileReporterFactory = new DefaultReporterFactory( startupReportConfiguration );
     }
+    
+    private void printRunParamatares(String forkMode) {
+      System.out.println("    Fork mode:              " + forkMode);
+      System.out.println("    Forked process timeout: " + forkedProcessTimeoutInSeconds + " sec.");
+      Commandline cl = createPrototypeCommandLine();
+      System.out.println("    Prototype command line: " + Arrays.toString(cl.getShellCommandline()) );
+    }
+    
+    private Commandline createPrototypeCommandLine() {
+      final Classpath bootClasspathConfiguration = forkConfiguration.getBootClasspath();
+
+      final Classpath additionlClassPathUrls = startupConfiguration.useSystemClassLoader()
+          ? startupConfiguration.getClasspathConfiguration().getTestClasspath()
+          : null;
+
+      // Surefire-booter + all test classes if "useSystemClassloader"
+      // Surefire-booter if !useSystemClassLoader
+      Classpath bootClasspath = Classpath.join( bootClasspathConfiguration, additionlClassPathUrls );
+
+      try {
+        @SuppressWarnings( "unchecked" ) 
+        Commandline cli =
+          forkConfiguration.createCommandLine( bootClasspath.getClassPath(),
+                                               startupConfiguration.getClassLoaderConfiguration(),
+                                               startupConfiguration.isShadefire() );
+        return cli;
+      } catch (SurefireBooterForkException sbfe) {
+        throw new RuntimeException(sbfe);
+      } 
+    }
 
     public RunResult run( SurefireProperties effectiveSystemProperties, DefaultScanResult scanResult, String requestedForkMode )
         throws SurefireBooterForkException, SurefireExecutionException
     {
+        printRunParamatares(requestedForkMode);
+        
         final RunResult result;
         try
         {
@@ -203,7 +236,7 @@ public class ForkStarter
                 resultFutures.add(future);
             }
 
-            System.out.println("########### " + resultFutures.size() + " test set tasks submitted for execution." );
+            System.out.println( resultFutures.size() + " test set tasks submitted for execution." );
             int obtainedResultCount = 0;
             for ( final Future<RunResult> resultFuture: resultFutures )
             {
@@ -213,7 +246,8 @@ public class ForkStarter
                     if ( current != null )
                     {
                       obtainedResultCount++;
-                      System.out.println("##### Results so far: #"+obtainedResultCount+": " + toDebugString(current) );
+                      System.out.println("   So far:   Sets: " + fmt(obtainedResultCount+",",5) + " " + toDebugString(current) );
+                      //System.out.println();
                       globalResult = current;
                     }
                     else
@@ -249,12 +283,28 @@ public class ForkStarter
         }
     }
 
+    public static String fmt(String s, int len) {
+      if (s != null && s.length() >= len) {
+        return s;
+      }
+      StringBuilder sb = new StringBuilder().append(s); 
+      do {
+        sb.append(" ");
+      } while (sb.length() < len);
+      return sb.toString();
+    }
+    
     public static String toDebugString(final RunResult rr) {
     	if (rr == null) {
     		return null;
     	}
-    	String x = "completed="+rr.getCompletedCount() + ": errors=" + rr.getErrors() + ", failures=" + rr.getFailures() + ", skipped=" + rr.getSkipped() + ", isFailure=" + rr.isFailure()
-                + ", isTimeout=" + rr.isTimeout();
+    	String x = 
+    	    "Completed: "    + fmt(rr.getCompletedCount()+",", 5) 
+    	    + " Errors: "    + fmt(rr.getErrors()+",", 5) 
+    	    + " Failures: "  + fmt(rr.getFailures()+",", 5)  
+    	    + " Skipped: "   + fmt(rr.getSkipped()+",", 5)  
+    	    + " IsFailure: " + fmt(rr.isFailure()+",", 7)  
+          + " IsTimeout: " + fmt(rr.isTimeout()+"", 6);
     	return x;
     }
     
@@ -329,7 +379,7 @@ public class ForkStarter
 
         if ( forkConfiguration.isDebug() )
         {
-            System.out.println( "Forking command line: " + cli );
+            System.out.println( "Forking command line: " + Arrays.toString(cli.getShellCommandline()) );
         }
 
         RunResult runResult = null;

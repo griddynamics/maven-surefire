@@ -22,6 +22,7 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import static org.apache.maven.plugin.surefire.booterclient.ForkStarter.fmt;
 
 /**
  * Maintains per-thread test result state. Not thread safe.
@@ -176,14 +177,14 @@ public class TestSetStats
         StringBuilder buf = new StringBuilder();
 
         buf.append( TEST_SET_COMPLETED_PREFIX );
-        buf.append( completedCount );
-        buf.append( ", Failures: " );
-        buf.append( failures );
-        buf.append( ", Errors: " );
-        buf.append( errors );
-        buf.append( ", Skipped: " );
-        buf.append( skipped );
-        buf.append( ", Time elapsed: " );
+        buf.append( fmt(completedCount+",", 5) );
+        buf.append( "Failures: " );
+        buf.append( fmt(failures+",", 5) );
+        buf.append( "Errors: " );
+        buf.append( fmt(errors+",", 5) );
+        buf.append( "Skipped: " );
+        buf.append( fmt(skipped+",", 5) );
+        buf.append( "Time elapsed: " );
         buf.append( reportEntry.elapsedTimeAsString() );
         buf.append( " sec" );
 

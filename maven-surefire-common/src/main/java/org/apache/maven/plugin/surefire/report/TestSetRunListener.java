@@ -126,7 +126,7 @@ public class TestSetRunListener
         {
             consoleReporter.testSetStarting( report );
             if (printTestMethodStatuses) {
-              consoleReporter.writeMessage("|");
+              consoleReporter.writeMessage("   |");
             }
         }
         consoleOutputReceiver.testSetStarting( report );

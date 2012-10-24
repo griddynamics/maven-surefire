@@ -57,7 +57,7 @@ public class ForkClient
     * This message will be written ion the end of each test set output file.
     * The purpose is to ensure that the file is fully written, not truncated somehow.  
     */
-    private static final byte[] finalMessageBytes = "===== END OF TEST SET OUTPUT =====".getBytes();
+    private static final byte[] finalMessageBytes = "===== END OF TEST SET OUTPUT =====\n".getBytes();
   
     private final ReporterFactory providerReporterFactory;
 

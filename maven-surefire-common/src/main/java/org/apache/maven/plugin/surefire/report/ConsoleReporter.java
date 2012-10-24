@@ -93,7 +93,7 @@ public class ConsoleReporter
     public void testSetCompleted( WrappedReportEntry report, TestSetStats testSetStats, List<String> testResults )
         throws ReporterException
     {
-        writeMessage( testSetStats.getTestSetSummary( report ) );
+        writeMessage( "   " + testSetStats.getTestSetSummary( report ) );
 
         if ( testResults != null )
         {
