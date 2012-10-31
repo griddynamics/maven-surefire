@@ -22,7 +22,11 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
+import org.apache.maven.plugin.surefire.report.TestSetRunListener.ConsoleColor;
+
 import static org.apache.maven.plugin.surefire.booterclient.ForkStarter.fmt;
+import static org.apache.maven.plugin.surefire.report.TestSetRunListener.redConsoleColor;
 
 /**
  * Maintains per-thread test result state. Not thread safe.
@@ -177,20 +181,20 @@ public class TestSetStats
         StringBuilder buf = new StringBuilder();
 
         buf.append( TEST_SET_COMPLETED_PREFIX );
-        buf.append( fmt(completedCount+",", 5) );
-        buf.append( "Failures: " );
-        buf.append( fmt(failures+",", 5) );
-        buf.append( "Errors: " );
-        buf.append( fmt(errors+",", 5) );
-        buf.append( "Skipped: " );
-        buf.append( fmt(skipped+",", 5) );
+        buf.append( fmt(Integer.toString(completedCount), 5) );
+        //buf.append(  );
+        buf.append( colorIf(fmt("Failures: " + failures, 15), redConsoleColor, failures > 0) );
+        //buf.append(  );
+        buf.append( colorIf(fmt("Errors: " + errors, 13), redConsoleColor, errors > 0) );
+        //buf.append(  );
+        buf.append( colorIf(fmt("Skipped: " + skipped, 14), redConsoleColor, skipped > 0) );
         buf.append( "Time elapsed: " );
         buf.append( reportEntry.elapsedTimeAsString() );
         buf.append( " sec" );
 
         if ( failures > 0 || errors > 0 )
         {
-            buf.append( " <<< FAILURE!" );
+          buf.append( colorIf(" <<< FAILURE!", redConsoleColor, true) );
         }
 
         buf.append( "\n" );
@@ -198,6 +202,14 @@ public class TestSetStats
         return buf.toString();
     }
 
+    private String colorIf(String x, ConsoleColor cc, boolean condition) {
+      if (condition && TestSetRunListener.colorConsoleOutputAnsi && cc != null) {
+        return cc.colorString(x);
+      } else {
+        return x;
+      }
+    } 
+    
     public List<String> getTestResults()
     {
         List<String> result = new ArrayList<String>();

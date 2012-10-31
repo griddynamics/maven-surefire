@@ -19,6 +19,7 @@ package org.apache.maven.plugin.surefire.report;
  * under the License.
  */
 
+import org.apache.maven.plugin.surefire.booterclient.ForkStarter;
 import org.apache.maven.plugin.surefire.runorder.StatisticsReporter;
 import org.apache.maven.surefire.report.ConsoleLogger;
 import org.apache.maven.surefire.report.ConsoleOutputReceiver;
@@ -45,12 +46,39 @@ public class TestSetRunListener
 {
     private static final boolean printTestMethodStatuses = true; 
     
+    public static final boolean colorConsoleOutputAnsi = 
+        ForkStarter.getBooleanSystemProperty("color-console-output-ansi", true);
+    
     private static final String MARK_TEST_PASSED =            ".";
-    private static final String MARK_TEST_FAILED =            "f";
-    private static final String MARK_TEST_ERROR =             "e";
-    private static final String MARK_TEST_SKIPPED =           "s";
+    private static final String MARK_TEST_FAILED =            "F";//"f";
+    private static final String MARK_TEST_ERROR =             "E";//"e";
+    private static final String MARK_TEST_SKIPPED =           "S";//"s";
     private static final String MARK_TEST_EXECUTION_TIMEOUT = "T";
     private static final String MARK_TEST_EXECUTION_ERROR =   "X";
+    
+    public static class ConsoleColor {
+      private final String start, end;
+      ConsoleColor(String start0, String end0) {
+        start = start0;
+        end = end0;
+      }
+      String getStart() {
+        return start;
+      }
+      String getEnd() {
+        return end;
+      }
+      public String colorString(String x) {
+        if (x == null || x.length() == 0) {
+          return x;
+        }
+        return start + x + end;
+      }
+    }
+    private static final String redColorStart = "\u001b\u005b\u0030\u0031\u003b\u0033\u0031\u006d\u001b\u005b\u004b";
+    private static final String redColorEnd   = "\u001b\u005b\u006d\u001b\u005b\u004b";
+    public static final ConsoleColor redConsoleColor = new ConsoleColor(redColorStart, redColorEnd);
+    //private static final ConsoleColor greenConsoleColor = new ConsoleColor(...);
   
     private final RunStatistics globalStatistics;
 
@@ -141,10 +169,15 @@ public class TestSetRunListener
         testStdOut.clear();
     }
     
-    private void printTestMethodResult(final String status) {
+    private void printTestMethodResult(final String status, 
+        final ConsoleColor consoleColor) {
       if (printTestMethodStatuses 
           && consoleReporter != null) {
-        consoleReporter.writeMessage(" " + status);
+        if (colorConsoleOutputAnsi && consoleColor != null) { 
+          consoleReporter.writeMessage(" " + consoleColor.colorString(status));
+        } else {
+          consoleReporter.writeMessage(" " + status);
+        }
       }
     }
 
@@ -231,7 +264,7 @@ public class TestSetRunListener
         {
             statisticsReporter.testSucceeded( reportEntry );
         }
-        printTestMethodResult(MARK_TEST_PASSED);
+        printTestMethodResult(MARK_TEST_PASSED, null /*green?*/);
         clearCapture();
       } else {
         System.out.println("ERROR: failed to succeed test ["+reportEntry+"].");
@@ -266,7 +299,7 @@ public class TestSetRunListener
             statisticsReporter.testError( reportEntry );
         }
         globalStatistics.addErrorSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        printTestMethodResult(testMethodStatus);
+        printTestMethodResult(testMethodStatus, redConsoleColor);
         clearCapture();
       } else {
         System.out.println("ERROR: failed to error test ["+reportEntry+"].");
@@ -283,7 +316,7 @@ public class TestSetRunListener
           statisticsReporter.testFailed( reportEntry );
         }
         globalStatistics.addFailureSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        printTestMethodResult(MARK_TEST_FAILED);
+        printTestMethodResult(MARK_TEST_FAILED, redConsoleColor);
         clearCapture();
       } else {
         System.out.println("ERROR: failed to fail test ["+reportEntry+"].");
@@ -300,7 +333,7 @@ public class TestSetRunListener
             statisticsReporter.testSkipped( reportEntry );
         }
         globalStatistics.addSkippedSource( reportEntry.getName(), reportEntry.getStackTraceWriter() );
-        printTestMethodResult(MARK_TEST_SKIPPED);
+        printTestMethodResult(MARK_TEST_SKIPPED, redConsoleColor);
         clearCapture();
       } else {
         System.out.println("ERROR: failed to skip test ["+reportEntry+"].");
