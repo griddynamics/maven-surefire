@@ -19,8 +19,11 @@ package org.apache.maven.plugin.surefire.booterclient;
  * under the License.
  */
 
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -96,6 +99,8 @@ public class ForkStarter
    */
   private static final boolean treatAbnormalForkedProcessExitAsTestErrorOnly 
     = getBooleanSystemProperty("treat-abnormal-forked-process-exit-as-test-error-only", true);
+  
+  private static final String listTestClassNamesFile = System.getProperty("list-test-class-names-file", null); 
   
   public static boolean getBooleanSystemProperty(final String propertyName, final boolean defaultValue) {
     final String value = System.getProperty(propertyName);
@@ -213,6 +218,28 @@ public class ForkStarter
             // Ask to the executorService to run all tasks
             RunResult globalResult = new RunResult( 0, 0, 0, 0 );
             final Iterator<Object> suites = getSuitesIterator();
+            
+            if (listTestClassNamesFile != null) {
+              File listFile = new File(listTestClassNamesFile);
+              OutputStream os = new BufferedOutputStream(new FileOutputStream(listFile, true/*append*/));
+              try {
+                while ( suites.hasNext() ) {
+                  final Object testSet = suites.next();
+                  final String v;
+                  if ( testSet instanceof Class )
+                  {  
+                    v = ((Class<?>)testSet).getName();
+                  } else {
+                    v = testSet.toString();
+                  }
+                  os.write((v + "\n").getBytes());
+                }
+              } finally {
+                os.close();
+              }
+              return globalResult;
+            }
+            
             while ( suites.hasNext() )
             {
                 final Object testSet = suites.next();
